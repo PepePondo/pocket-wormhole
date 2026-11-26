@@ -1,0 +1,115 @@
+# PortHub build of Pocket Wormhole (FTL).
+# - Every Monday (or when run by hand) merges the original project's changes into the porthub branch.
+#   If the PortHub patch no longer merges cleanly, it opens an issue instead.
+# - Builds a signed APK and publishes it as the latest release, which PortHub installs.
+name: PortHub
+
+on:
+  push:
+    branches:
+      - porthub
+  schedule:
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write
+
+concurrency:
+  group: porthub
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  UPSTREAM: https://github.com/adamkulik/pocket-wormhole.git
+  UPSTREAM_BRANCH: main
+
+jobs:
+  sync:
+    name: Merge upstream
+    if: github.event_name != 'push'
+    runs-on: ubuntu-latest
+    outputs:
+      changed: ${{ steps.merge.outputs.changed }}
+    steps:
+      - name: Clone
+        uses: actions/checkout@v4
+        with:
+          ref: porthub
+          fetch-depth: 0
+
+      - name: Merge
+        id: merge
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch "$UPSTREAM" "$UPSTREAM_BRANCH"
+          if git merge-base --is-ancestor FETCH_HEAD HEAD; then
+            echo "Already up to date with upstream."
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git merge --no-edit -m "Merge upstream changes" FETCH_HEAD
+          git push origin HEAD:porthub
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Report a failed merge
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh issue create -R "$GITHUB_REPOSITORY" \
+            --title "Upstream changes no longer merge with the PortHub patch" \
+            --body "The weekly merge from $UPSTREAM ($UPSTREAM_BRANCH) failed: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID. The last release keeps working; merge by hand to resume updates."
+
+  build:
+    name: Build and release
+    needs: sync
+    if: >-
+      always() && (github.event_name == 'push' ||
+      (needs.sync.result == 'success' &&
+      (needs.sync.outputs.changed == 'true' || github.event_name == 'workflow_dispatch')))
+    runs-on: ubuntu-latest
+    steps:
+      - name: Clone
+        uses: actions/checkout@v4
+        with:
+          ref: porthub
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+          cache: gradle
+
+      - name: Build
+        env:
+          KEYSTORE_BASE64: ${{ secrets.PORTHUB_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.PORTHUB_KEYSTORE_PASSWORD }}
+        run: |
+          printf '%s' "$KEYSTORE_BASE64" | tr -d '\r\n ' | base64 --decode > "$RUNNER_TEMP/porthub.jks"
+          pw=$(printf '%s' "$KEYSTORE_PASSWORD" | tr -d '\r\n')
+          chmod +x gradlew
+          ./gradlew assembleRelease \
+            -Ppocketwormhole.storeFile="$RUNNER_TEMP/porthub.jks" \
+            -Ppocketwormhole.storePassword="$pw" \
+            -Ppocketwormhole.keyAlias=porthub \
+            -Ppocketwormhole.keyPassword="$pw" \
+            -PporthubVersionCode=$((1000 + GITHUB_RUN_NUMBER))
+          rm -f "$RUNNER_TEMP/porthub.jks"
+          cp app/build/outputs/apk/release/app-release.apk "$GITHUB_WORKSPACE/pocket-wormhole-porthub.apk"
+
+      - name: Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="porthub-$GITHUB_RUN_NUMBER"
+          gh release create "$tag" pocket-wormhole-porthub.apk -R "$GITHUB_REPOSITORY" \
+            --target "$(git rev-parse HEAD)" --latest \
+            --title "Pocket Wormhole for PortHub (build $GITHUB_RUN_NUMBER)" \
+            --notes "Pocket Wormhole (FTL) with PortHub's patch: reads ftl.dat in place from Internal storage/PortHub/FTL, where PortHub copies it, instead of asking for the file and copying it. Installs next to the original app as com.pocketwormhole.android.porthub. Built from $(git rev-parse --short HEAD)."
