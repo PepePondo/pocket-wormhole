@@ -111,11 +111,7 @@ class MainActivity : Activity() {
         val portHubDir = File(android.os.Environment.getExternalStorageDirectory(), "PortHub/FTL")
         if (!portHubDir.isDirectory) return false
         if (!android.os.Environment.isExternalStorageManager()) {
-            statusText.text = "FTL
-
-PortHub copied ftl.dat to Internal storage/PortHub/FTL.
-
-" +
+            statusText.text = "FTL\n\nPortHub copied ftl.dat to Internal storage/PortHub/FTL.\n\n" +
                     "Tap anywhere, then switch on \"All files access\" for this app and come back."
             root.setOnClickListener {
                 awaitingAccess = true
