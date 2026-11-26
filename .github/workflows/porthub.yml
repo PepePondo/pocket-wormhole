@@ -95,7 +95,8 @@ jobs:
           printf '%s' "$KEYSTORE_BASE64" | tr -d '\r\n ' | base64 --decode > "$RUNNER_TEMP/porthub.jks"
           pw=$(printf '%s' "$KEYSTORE_PASSWORD" | tr -d '\r\n')
           chmod +x gradlew
-          ./gradlew assembleRelease \
+          # gradle.properties names the author's own JDK folder; use the runner's.
+          ./gradlew assembleRelease -Dorg.gradle.java.home="$JAVA_HOME" \
             -Ppocketwormhole.storeFile="$RUNNER_TEMP/porthub.jks" \
             -Ppocketwormhole.storePassword="$pw" \
             -Ppocketwormhole.keyAlias=porthub \
