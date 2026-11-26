@@ -78,6 +78,9 @@ class MainActivity : Activity() {
 
         hideSystemUi()
 
+        // PortHub: run from the ftl.dat PortHub copied, without a picker or a private copy.
+        if (usePortHubDat()) return
+
         // Try to start the game; if there's no ftl.dat yet, ask for it.
         val datPath = checkForFtlDat()
         if (datPath != null) {
@@ -93,6 +96,37 @@ class MainActivity : Activity() {
                 }
             }
         }
+    }
+
+    /** Waiting for the player to allow "All files access" for PortHub's ftl.dat. */
+    private var awaitingAccess = false
+
+    /**
+     * PortHub copies ftl.dat to Internal storage/PortHub/FTL. When the app has no ftl.dat of its own,
+     * the engine reads that one in place (it needs "All files access" to). Returns true while asking.
+     */
+    private fun usePortHubDat(): Boolean {
+        if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.R) return false
+        if (File(filesDir, "ftl.dat").isFile) return false
+        val portHubDir = File(android.os.Environment.getExternalStorageDirectory(), "PortHub/FTL")
+        if (!portHubDir.isDirectory) return false
+        if (!android.os.Environment.isExternalStorageManager()) {
+            statusText.text = "FTL
+
+PortHub copied ftl.dat to Internal storage/PortHub/FTL.
+
+" +
+                    "Tap anywhere, then switch on \"All files access\" for this app and come back."
+            root.setOnClickListener {
+                awaitingAccess = true
+                startActivity(Intent(android.provider.Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+                    Uri.parse("package:$packageName")))
+            }
+            return true
+        }
+        val dat = portHubDir.listFiles()?.firstOrNull { it.isFile && it.name.equals("ftl.dat", ignoreCase = true) }
+        if (dat != null) System.setProperty("xftl.datafile-path", dat.absolutePath)
+        return false
     }
 
     private fun checkForFtlDat(): Path? {
@@ -201,6 +235,11 @@ class MainActivity : Activity() {
     override fun onResume() {
         super.onResume()
 
+        if (awaitingAccess) {
+            awaitingAccess = false
+            recreate()
+            return
+        }
         surfaceView?.onResume()
         org.lwjgl.openal.SoftAL.get().resumeOutput()
     }

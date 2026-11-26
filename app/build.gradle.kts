@@ -9,9 +9,11 @@ android {
 
     defaultConfig {
         applicationId = "com.pocketwormhole.android"
+        // PortHub build: installs next to the original app, and each release updates over the last.
+        applicationIdSuffix = ".porthub"
         minSdk = 26
         targetSdk = 34
-        versionCode = 12
+        versionCode = (findProperty("porthubVersionCode") as String?)?.toInt() ?: 12
         versionName = "0.2.7"
     }
 
